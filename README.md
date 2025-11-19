@@ -1,3 +1,6 @@
+OS: Raspberry Pi OS
+Hardware: Raspberry Pi 5 16gb, Arduino Uno | others mentioned later on
+
 These files are the code to my ISE 102 final project. 
 The project is a hijacked ELEGOO Tumbller kit robot, but instead of self balancing, it is now too heavy to self balance (whoops) but now follows the color red!
 The parts added to the original kit are: 
@@ -9,6 +12,9 @@ The parts added to the original kit are:
 The original footprint of the robot was too shallow to accompany all of the parts added onto it, so the chasis was modified. 
 Instead of putting all of the acryllic plates vertical, one acryllic plate was placed behind the aluminum sheet to hold the anker battery pack.
 With the anker battry pack as the base, the original battery pack, speaker, and wire container were all built on top of it. 
+
+FOR THE CAMERA: during development I ran into some issues getting the Pi to recognize and use the USB camera. Changing the camera to a V4L2 backend seems to have solved the problem. 
+WITH THIS CHANGE BEING MADE THIS PROGRAM DOES NOT RUN ON WINDOWS
 
 A part of the robot is that it plays sounds when performing certian actions.
 The robot plays sounds when it is:
