@@ -10,9 +10,9 @@ import random
 
 # Camera Settings
 CAMERA_INDEX = 0 
-#1080p Resolution
-FRAME_WIDTH = 1920
-FRAME_HEIGHT = 1080
+# Requested 1080x720 resolution (720p)
+FRAME_WIDTH = 1080
+FRAME_HEIGHT = 720
 FRAME_CENTER_X = FRAME_WIDTH // 2
 
 # Motor Control Settings (MUST match your Arduino sketch commands: F, L, R, S)
@@ -25,11 +25,12 @@ COMMAND_STOP = 'S'
 COMMAND_SEARCH_TURN = 'R' 
 
 # --- AUDIO CONFIGURATION ---
-SOUND_FOLDER = "./sounds"
-READY_SOUND_FILE = "ready_chime.mp3"        
-TRACKING_SOUND_FILE = "tracking_loop.mp3"   # Plays when moving straight (COMMAND_FORWARD)
-SEARCHING_SOUND_FILE = "searching_turn.mp3" # Plays when turning (L, R, or search turn 'R')
-RANDOM_SOUND_FILES = ["beep1.mp3", "chime.mp3", "whirr.mp3"] 
+SOUND_FOLDER = "./sounds"  # Make sure this folder exists with your sound files
+READY_SOUND_FILE = "tada.mp3"        
+TRACKING_SOUND_FILE = "alert.mp3"   # Plays ONCE when moving straight (COMMAND_FORWARD)
+SEARCHING_SOUND_FILE = "sonar.mp3" # Plays when turning (L, R, or search turn 'R')
+RANDOM_SOUND_FILES = ["yippee.mp3", "shaw.mp3"] 
+# --- END AUDIO CONFIGURATION ---
 
 # --- COLOR TRACKING CONFIGURATION (RED) ---
 LOWER_RED_1 = np.array([0, 100, 100])
@@ -46,14 +47,14 @@ MIN_CONTOUR_AREA = 1000
 TRACKING_BOX_COLOR = (0, 255, 255)      
 TEXT_COLOR = (255, 255, 255)          
 
+# Global sound variable storage
+current_tracking_sound = None
+
 # --- Audio Initialization and Control Functions ---
 def initialize_audio():
     """Initializes the pygame mixer."""
     try:
         pygame.mixer.init()
-        # Set buffer size for lower latency on RPi if needed (optional)
-        # pygame.mixer.quit() 
-        # pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
         print("Audio mixer initialized successfully.")
     except Exception as e:
         print(f"Warning: Could not initialize audio mixer. Sounds disabled. Reason: {e}")
@@ -63,17 +64,18 @@ def initialize_audio():
 def play_sound(filename):
     """Plays a sound file from the configured folder."""
     if not pygame.mixer.get_init():
-        return
+        return None
     
     full_path = os.path.join(SOUND_FOLDER, filename)
     if not os.path.exists(full_path):
         print(f"Sound file not found: {full_path}")
-        return
+        return None
 
     try:
         sound = pygame.mixer.Sound(full_path)
+        # Note: We return the sound object for control in the main loop
         sound.play()
-        return sound
+        return sound 
     except Exception as e:
         print(f"Error playing sound {filename}: {e}")
         return None
@@ -101,10 +103,13 @@ def send_command(ser, command):
 # --- Main Program Loop ---
 def run_color_follower():
     # 1. Initialize Hardware
+    global current_tracking_sound # Use the global sound variable
+    
     ser = initialize_serial(SERIAL_PORT, BAUD_RATE)
     audio_enabled = initialize_audio()
     
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    # FIX: Explicitly use V4L2 backend for stability on Raspberry Pi
+    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2) 
     if not cap.isOpened():
         print(f"Error: Cannot open camera at index {CAMERA_INDEX}. Check connection.")
         if ser: ser.close()
@@ -120,10 +125,11 @@ def run_color_follower():
     actual_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     actual_fps = cap.get(cv2.CAP_PROP_FPS)
 
-    # DYNAMIC CENTER LINE RECALCULATION
+    # DYNAMIC CENTER LINE RECALCULATION (Increased Tolerance)
     global CENTER_TOLERANCE_ZONE_WIDTH, CENTER_ZONE_START, CENTER_ZONE_END
     
-    CENTER_TOLERANCE_ZONE_WIDTH = actual_width / 3 
+    # Divisor 2.5 gives 40% of the screen for straight movement
+    CENTER_TOLERANCE_ZONE_WIDTH = actual_width / 2.5 
     CENTER_ZONE_START = (actual_width - CENTER_TOLERANCE_ZONE_WIDTH) // 2 
     CENTER_ZONE_END = CENTER_ZONE_START + CENTER_TOLERANCE_ZONE_WIDTH
     
@@ -140,15 +146,16 @@ def run_color_follower():
     start_time = time.time()
     current_motor_command = COMMAND_STOP 
     
-    # Audio State Variables
+    # Audio State Variables for single-play tracking sound
     last_random_time = time.time()
     next_random_interval = random.uniform(5.0, 15.0)
+    tracking_sound_played_this_cycle = False
     
     while True:
         ret, frame = cap.read()
         if not ret: break
         
-        # --- A. HSV Color Detection and Tracking (Same Logic) ---
+        # --- A. HSV Color Detection and Tracking ---
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask1 = cv2.inRange(hsv, LOWER_RED_1, UPPER_RED_1)
         mask2 = cv2.inRange(hsv, LOWER_RED_2, UPPER_RED_2)
@@ -201,27 +208,43 @@ def run_color_follower():
         cv2.line(frame, (int(CENTER_ZONE_END), 0), (int(CENTER_ZONE_END), FRAME_HEIGHT), (255, 255, 0), 1)
             
         
-        # --- C. Audio Control Logic ---
+        # --- C. Audio Control Logic (FINAL REVISION) ---
         if audio_enabled:
-            # Check the three possible action states
             is_following = (new_motor_command == COMMAND_FORWARD)
             is_turning = (new_motor_command == COMMAND_LEFT or new_motor_command == COMMAND_RIGHT)
             is_searching = (new_motor_command == COMMAND_SEARCH_TURN)
 
             # 1. Control Tracking/Searching Sounds
-            # Use mixer.get_busy() to avoid restarting sound every frame
             if is_following:
-                if not pygame.mixer.get_busy():
-                    play_sound(TRACKING_SOUND_FILE)
+                if not tracking_sound_played_this_cycle:
+                    # Play tracking sound ONLY ONCE when entering forward state
+                    pygame.mixer.stop()
+                    current_tracking_sound = play_sound(TRACKING_SOUND_FILE)
+                    tracking_sound_played_this_cycle = True
+            
             elif is_turning or is_searching:
-                 if not pygame.mixer.get_busy():
+                if current_tracking_sound:
+                    current_tracking_sound.stop()
+                    current_tracking_sound = None
+                
+                # Reset tracking flag and play searching sound
+                tracking_sound_played_this_cycle = False
+                
+                # Play searching sound if no sound is currently playing 
+                if not pygame.mixer.get_busy():
                     play_sound(SEARCHING_SOUND_FILE)
+            
             else: # COMMAND_STOP
+                if current_tracking_sound:
+                    current_tracking_sound.stop()
+                    current_tracking_sound = None
                 pygame.mixer.stop()
+                tracking_sound_played_this_cycle = False
+
 
             # 2. Random Sound Check
             if time.time() - last_random_time >= next_random_interval:
-                # Only play random sound if NO other sound is currently playing (priority to motor actions)
+                # Only play random sound if NO other sound is currently playing 
                 if RANDOM_SOUND_FILES and not pygame.mixer.get_busy():
                     random_file = random.choice(RANDOM_SOUND_FILES)
                     play_sound(random_file)
@@ -262,6 +285,10 @@ def run_color_follower():
     send_command(ser, COMMAND_STOP) 
     cap.release()
     cv2.destroyAllWindows()
+    
+    # Ensure tracking sound is stopped on exit
+    if current_tracking_sound:
+        current_tracking_sound.stop()
     
     if pygame.mixer.get_init():
         pygame.mixer.quit()
