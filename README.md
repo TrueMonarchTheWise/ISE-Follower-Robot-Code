@@ -15,7 +15,8 @@ Instead of putting all of the acryllic plates vertical, one acryllic plate was p
 With the anker battry pack as the base, the original battery pack, speaker, and wire container were all built on top of it. 
 
 FOR THE CAMERA: during development I ran into some issues getting the Pi to recognize and use the USB camera. Changing the camera to a V4L2 backend seems to have solved the problem. 
-WITH THIS CHANGE BEING MADE THIS PROGRAM DOES NOT RUN ON WINDOWS
+
+# WITH THIS CHANGE BEING MADE THIS PROGRAM DOES NOT RUN ON WINDOWS
 
 A part of the robot is that it plays sounds when performing certian actions.
 The robot plays sounds when it is:
