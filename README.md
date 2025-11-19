@@ -1,4 +1,5 @@
 OS: Raspberry Pi OS
+
 Hardware: Raspberry Pi 5 16gb, Arduino Uno | others mentioned later on
 
 These files are the code to my ISE 102 final project. 
